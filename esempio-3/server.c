@@ -4,141 +4,154 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
-void print_bytes(const void *object, size_t size)
-{
-  const unsigned char * const bytes = object;
-  size_t i;
+struct header_ip{
+  // con i due punti riduco la dimensione del type
+  // char  = 1 byte, uint8_t
+  // short = 2 byte, uint16_t
+  unsigned char ip_version:4;   
+  unsigned char ip_hdr_len:4;   
+  unsigned char ip_tos;
+  unsigned short int ip_len;
+  unsigned short int ip_id;
+  unsigned char ip_flag:3;
+  unsigned short int ip_offset:13; 
+  unsigned char ip_ttl;
+  unsigned char ip_proto;
+  unsigned short int ip_chk;
+  struct in_addr ip_src;
+  struct in_addr ip_dst;
+};
 
-  printf("[ ");
-  for(i = 0; i < size; i++)
-  {
-    //printf("%02x ", bytes[i]);
-    int z;
-    for (z = 0; z < 8; z++) {
-      printf("%d", !!((bytes[i] << z) & 0x80));
-    }
-    printf(" ");
-  }
-  printf("]\n");
+
+void print_datagram(struct header_ip * datagram){
+  printf("{\n");
+  printf("  ip_version: %d\n", datagram->ip_version);
+  printf("  ip_hdr_len: %d\n", datagram->ip_hdr_len);
+  printf("  ip_tos: %d\n", datagram->ip_tos);
+  printf("  ip_len: %d\n", datagram->ip_len);
+  printf("  ip_id: %d\n", datagram->ip_id);
+  printf("  ip_flag: %d\n", datagram->ip_flag);
+  printf("  ip_offset: %d\n", datagram->ip_offset);
+  printf("  ip_ttl: %d\n", datagram->ip_ttl);
+  printf("  ip_proto: %d\n", datagram->ip_proto);
+  printf("  ip_chk: %d\n", datagram->ip_chk);
+  printf("  ip_src: %d\n", datagram->ip_src);
+  printf("  ip_dst: %d\n", datagram->ip_dst);
+  printf("}\n");
 }
 
-//SERVER
 int main(){
 
   int sock, connection;
   
-  //Creazione del socket
-  printf("Creo il socket!\n");
+  // Creazione del socket
   sock = socket(AF_INET, SOCK_STREAM, 0);
   if(sock == -1){
-    //Errore
-    printf("socket error\n");
-    exit(-1);
+    printf("Errore nella creazione del socket: %s\n", strerror(errno));
+    exit(1);
   }
-  //Bind: Colleghiamo il socket ad un indirizzo
+
+  // Collego il socket ad una porta
   struct sockaddr_in localadress;
-  memset(&localadress, 0, sizeof(localadress)); //Setto a 0 tutti i campi della struct localadress
+  // Resetto la struct
+  memset(&localadress, 0, sizeof(localadress));
+
   localadress.sin_family = AF_INET; 
-  localadress.sin_addr.s_addr = htonl(INADDR_ANY); //Accetto tutti gli ip
-  localadress.sin_port = htons(60000);
-  int b;
-  printf("Bindo!\n");
-  b = bind(sock, (struct sockaddr*)&localadress, sizeof(localadress)); //Cast esplicito a puntatore a struttura
-  if(b == -1){
-    //Errore nel bind
+  localadress.sin_addr.s_addr = htonl(INADDR_ANY); // da tutti gli ip
+  localadress.sin_port = htons(90000); // sulla porta 90000
+
+  if(bind(sock, (struct sockaddr*)&localadress, sizeof(localadress)) == -1){
+    printf("Errore nel bind: %s\n", strerror(errno));
+    exit(1);
   }
-  printf("Ascolto!\n");
+
   //Listen: Mi metto in ascolto fino a un max di x connessioni
-  listen(sock, 100);
-  printf("In ascolto!\n");
+  if (listen(sock, 100) == -1){
+    printf("Errore nell'avvio del listen: %s\n", strerror(errno));
+    exit(1);
+  }
+
+  printf("Server Avviato!\n");
   
-  char buffer[255];
-  time_t ticks;
 
   while(1){
-    /*
-       It extracts the first connection
-       request on the queue of pending connections for the listening socket,
-       sockfd, creates a new connected socket, and returns a new file
-       descriptor referring to that socket.  The newly created socket is not
-       in the listening state.  The original socket sockfd is unaffected by
-       this call.
-    */
     struct sockaddr_in client;
     socklen_t len = sizeof(client);
     connection = accept(sock, (struct sockaddr*) &client, (socklen_t*) &len); //Su stessa porta e indirizzo, lasciando inalterato sock
-    
-    printf("%s\n",inet_ntoa(client.sin_addr));
+    printf("Ricevuta richiesta di connessione da indirizzo: %s \n", inet_ntoa(client.sin_addr));
+
+    if (connection == -1){
+      printf("Errore nell'accettare la connessione: %s\n", strerror(errno));
+    }
+
     int pid;
-    if ((pid = fork()) == -1)
-        {
-            close(connection);
-            continue;
-        }
-        else if(pid > 0)
-        {
-            //printf("got connection from %s", &client_address);
-            close(connection);
-            //counter++;
-            //printf("here2\n");
-            continue;
-        }
-        else if(pid == 0)
-        {
-          printf("%d\n",ntohs(client.sin_port));
+    if ((pid = fork()) > 0){
 
-          struct header_ip{
-            //char = 1 byte, uint8_t
-            //short = 2 byte, uint16_t
-            unsigned char ip_version:4;   //!< The IP version.
-            unsigned char ip_hdr_len:4;   //!< The IP header length.
-            unsigned char ip_tos;
-            unsigned short int ip_len;
-            unsigned short int ip_id;
-            unsigned char ip_flag:3;
-            unsigned short int ip_offset:13; //Offset
-            unsigned char ip_ttl;
-            unsigned char ip_proto;
-            unsigned short int ip_chk;
-            struct in_addr ip_src;
-            struct in_addr ip_dst;
-          };
-          struct header_ip iph;
-          int n = read(connection, &iph, sizeof(iph));
-          if(n > 0){
-            printf("Header ricevuto\n");
-            struct in_addr temp = iph.ip_src;
-            iph.ip_src = iph.ip_dst;
-            iph.ip_dst = temp;
-            iph.ip_version = 0b0;
-            iph.ip_hdr_len = 0b0;
-            iph.ip_tos = 0b0;
-            iph.ip_len = 0b0;
-            iph.ip_id = 0b0;
-            iph.ip_flag = 0b0;
-            iph.ip_offset = 0b0;
-            iph.ip_ttl = 0b0;
-            iph.ip_proto = 0b0;
-            iph.ip_chk = 0b0;
-            print_bytes(&iph, sizeof(iph));
+      // Processo padre
+      close(connection);
+      continue;
 
-            write(connection, &iph, sizeof(iph));
+    } else if (pid == 0){
+      // Processo figlio
+      printf("Porta assegnata dal kernel: %d\n",ntohs(client.sin_port));
+
+      struct header_ip iphead;
+      
+      if(read(connection, &iphead, sizeof(iphead)) == -1){
+        printf("Errore nell'ricevere il datagram: %s\n", strerror(errno));
+        exit(1);
+      }
+
+      printf("Header ricevuto\n");
+      
+      // Switch src <-> dst
+      struct in_addr temp = iphead.ip_src;
+      iphead.ip_src = iphead.ip_dst;
+      iphead.ip_dst = temp;
+
+      iphead.ip_version  = 0b0;
+      iphead.ip_hdr_len  = 0b0;
+      iphead.ip_tos      = 0b0;
+      iphead.ip_len      = 0b0;
+      iphead.ip_id       = 0b0;
+      iphead.ip_flag     = 0b0;
+      iphead.ip_offset   = 0b0;
+      iphead.ip_ttl      = 0b0;
+      iphead.ip_proto    = 0b0;
+      iphead.ip_chk      = 0b0;
+
+      print_datagram(&iphead);
+
+      // Invio il datagram invertito
+      if(write(connection, &iphead, sizeof(iphead)) == -1){
+        printf("Errore nell'inviare il datagram invertito: %s\n", strerror(errno));
+        exit(1);
+      }
             
-            unsigned short int porta = ntohs(client.sin_port);
-            write(connection, &porta, sizeof(porta));
+      unsigned short int kernel_server_port = ntohs(client.sin_port);
+        
+      if(write(connection, &kernel_server_port, sizeof(kernel_server_port)) == -1){
+        printf("Errore nell'inviare la porta del kernel: %s\n", strerror(errno));
+        exit(1);
+      }
 
-            n = read(connection, NULL, NULL);
-            if(n == 0){
-              printf("Connessione chiusa dal client: %s\n", inet_ntoa(client.sin_addr));
-              close(connection);
-            }
 
-          }else{
-            printf("Errore: %s\n", strerror(errno));
-          }
-        }
+      if(read(connection, NULL, NULL) == 0){
+        printf("Connessione chiusa dal client: %s\n", inet_ntoa(client.sin_addr));
+        close(connection);
+      }
+
+      }else{
+            
+            printf("Errore nel fork\n");
+          
+      }
     
 
   }
+  close(connection);
 }
